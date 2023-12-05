@@ -50,7 +50,7 @@ function Parser.new(f)
   return self
 end
 function Parser:run(targetstring)
-
+  assert(targetstring, 'run got nil targetstring')
   local initialstate =  readonlytable{
   targetstring,
   index = 1,
@@ -63,7 +63,7 @@ end
 function Parser:map(fn)
   return self.new(function (parserstate)
     local nextstate = self.f(parserstate)
-    if(nextstate.iserror)  then return nextstate  end
+    if nextstate.iserror  then return nextstate  end
     return update(nextstate,nextstate.index , fn(nextstate.result))
   end)
 end
@@ -93,6 +93,7 @@ local string_parser = function (s)
     local index = parserstate.index
     local iserror = parserstate.iserror
     if iserror then return parserstate end
+    assert(targetstring, 'targetstring should not be nil in string parser')
     local sliced =targetstring:sub(index)
     if #sliced == 0 then return errorupdate(parserstate, string.format("unexpected eof at %d", index)) end
 
@@ -111,6 +112,7 @@ local letters =
     local index = parserstate.index
     local iserror = parserstate.iserror
     if iserror then return parserstate end
+    assert(targetstring, 'targetstring should not be nil in numbers parser')
     local sliced =targetstring:sub(index)
     if #sliced == 0 then return errorupdate(parserstate, string.format("letters: unexpected eof at %d", index)) end
     local match =sliced:match('^%a+')
@@ -126,6 +128,7 @@ local numbers = Parser(function (parserstate)
     local targetstring = parserstate[1]
     local index = parserstate.index
     local iserror = parserstate.iserror
+    assert(targetstring, 'targetstring should not be nil in numbers parser')
     if iserror then
         return parserstate
     end
@@ -142,6 +145,7 @@ local numbers = Parser(function (parserstate)
 
 local sequenceof = function (parsers)
   return Parser(function (parserstate)
+    if parserstate.iserror then return parserstate end
     local results = {}
     local nextstate = parserstate
     for _, p in ipairs(parsers) do
@@ -161,6 +165,7 @@ end
 
 local many = function (parser)
   return Parser(function (parserstate)
+    if parserstate.iserror then return parserstate end
     local results = {}
     local nextstate = parserstate
     local done = false
@@ -178,9 +183,10 @@ local many = function (parser)
   end
   )
 end
--- TODO inspect
+
 local many1 = function (parser)
   return Parser(function (parserstate)
+    if parserstate.iserror then return parserstate end
     local results = {}
     local nextstate = parserstate
     local done = false
@@ -210,6 +216,7 @@ local choice = function (parsers)
         return parserstate
     end
     for i, p in ipairs(parsers) do
+      assert(p, 'parser nil in choice')
       local nextstate = p.f(parserstate)
       if not(nextstate.iserror) then
           return nextstate
@@ -229,9 +236,9 @@ gettableresult = function(t)
   local res = "{"
   for k,v in pairs(t) do
     if type(v) == "table" then
-        res = res .. k .. ':' .. gettableresult(v) .. ','
+        res = res .. k .. ' : ' .. gettableresult(v) .. ', '
     else
-        res = res .. k .. ':' .. tostring(v) .. ','
+        res = res .. k .. ' : ' .. tostring(v) .. ', '
     end
   end
   res = res ..  '}'
@@ -269,12 +276,72 @@ p = p:map(function (x)
   return '<' .. res:sub(1,#res-1) .. '>'
   end
 )
+
+local sepby = function (seperatorparser)
+  return function(valueparser)
+    return Parser(function (parserstate)
+        if parserstate.iserror then return parserstate end
+        local results = {}
+        local nextstate = parserstate
+        while true do
+          local thethingwewant = valueparser.f(nextstate)
+          if thethingwewant.iserror then
+              break
+          end
+          table.insert(results,thethingwewant.result)
+          nextstate = thethingwewant
+          local sepstate = seperatorparser.f(nextstate)
+          if sepstate.iserror then
+              break
+          end
+          nextstate = sepstate
+
+        end
+        return update(nextstate,nextstate.index, results)
+    end)
+  end
+end
+
+local sepby1 = function (seperatorparser)
+  return function(valueparser)
+    return Parser(function (parserstate)
+        if parserstate.iserror then return parserstate end
+        local results = {}
+        local nextstate = parserstate
+        while true do
+          local thethingwewant = valueparser.f(nextstate)
+          if thethingwewant.iserror then
+              break
+          end
+          table.insert(result,thethingwewant.result)
+          nextstate = thethingwewant
+          local sepstate = seperatorparser.f(nextstate)
+          if sepstate.iserror then
+              break
+          end
+          nextstate = sepstate
+
+        end
+        if #results == 0 then
+          local emsg = string.format('sepby1: Unable to match any input using parser @ index= %d',nextstate.index)
+          return errorupdate(nextstate,emsg)
+        end
+        return update(nextstate,nextstate.index, results)
+    end)
+  end
+end
+
+
 local sparser = letters:map(function (x) return {typeof='string' , value = x} end)
 local numberparser = numbers:map(function (x) return {typeof='number' , value = tonumber(x)} end)
 local dicehelper =sequenceof { numbers, string_parser('d'), numbers}
 local diceparser = dicehelper:map(function (x) return {typeof='diceroll' , value = {x[1], x[3]}} end)
 
 local betweenparens = between(string_parser('('), string_parser(')'))
+
+
+
+
 local p = betweenparens(letters)
 p = p:map(function (x) return x:upper() end)
 p = p:errormap(function (msg, idx) return string.format("'%s' error @ index=%d",msg, idx)  end )
@@ -285,7 +352,6 @@ a = p:run('(hello)')
 local p2 =  sequenceof {letters, string_parser(':')}
 local p2 = p2:map( function (x) return x[1] end )
 p2 = p2:chain( function (typeof)
-    print('chain is called')
     if typeof == 'string' then
         return sparser
     elseif typeof == 'number' then
@@ -303,6 +369,48 @@ end)
 -- print_parser_state(b)
 -- c = p2:run('number:42')
 -- print_parser_state(c)
-d = p2:run('diceroll:2d10')
+-- d = p2:run('diceroll:2d10')
+-- print_parser_state(d)
+
+local betweensquarebrackets = between(string_parser('['), string_parser(']'))
+local commaseperated= sepby(string_parser(','))
+-- local p3 = (commaseperated(numbers))
+-- local exampletarget = '1,2,3,4'
+-- e = p3:run(exampletarget)
+-- print_parser_state(e)
+
+
+-- local p4 =  betweensquarebrackets(commaseperated(letters))
+-- e = p4:run(exampletarget)
+-- print_parser_state(e)
+local p5 = betweensquarebrackets(commaseperated(letters))
+-- p5 = p5:map(function (x) return x[2] end)
+exampletarget = '[a,b,c,d]'
+d = p5:run(exampletarget)
 print_parser_state(d)
 
+-- local p5 =  betweensquarebrackets((letters))
+-- exampletarget = '[abcd]'
+-- e = p5:run(exampletarget)
+-- print_parser_state(e)
+
+local lazy = function (thunk)
+    local f = function()
+        -- TODO: consider one time evaluation for parser
+        while true do coroutine.yield( thunk()) end
+    end
+    local thread = coroutine.create(f)
+    return Parser(
+        function (parserstate)
+            local s,v = coroutine.resume(thread)
+            return v.f(parserstate)
+        end
+    )
+end
+
+local arrayparser
+local elems = lazy(function() return choice({numbers, arrayparser}) end )
+arrayparser = betweensquarebrackets(commaseperated(elems))
+
+f = arrayparser:run('[1,2,[3,4],5]')
+print_parser_state(f)
