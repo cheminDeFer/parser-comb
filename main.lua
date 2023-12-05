@@ -245,7 +245,7 @@ gettableresult = function(t)
   return res
 end
 
-local print_parser_state = function (state) --TODO: reconsider me for arrays etc
+local print_parser_state = function (state)
 
   local f;
   if state.iserror then
