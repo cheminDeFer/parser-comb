@@ -144,11 +144,13 @@ local numbers = Parser(function (parserstate)
   )
 
 local sequenceof = function (parsers)
+  assert(#parsers >= 1, 'sequenceof should have at least one parser')
   return Parser(function (parserstate)
     if parserstate.iserror then return parserstate end
     local results = {}
     local nextstate = parserstate
-    for _, p in ipairs(parsers) do
+    for i, p in ipairs(parsers) do
+      assert(p~=nil, string.format('xth parser in sequence of is nil x = %d',i))
       nextstate = p.f(nextstate)
       table.insert(results,nextstate.result)
     end
@@ -414,3 +416,72 @@ arrayparser = betweensquarebrackets(commaseperated(elems))
 
 f = arrayparser:run('[1,2,[3,4],5]')
 print_parser_state(f)
+
+local bitparser = Parser (function(parserstate)
+  if parserstate.iserror then return parserstate end
+  local byteoffset= math.floor(parserstate.index / 8)
+  local bitoffset = (parserstate.index - 1) % 8
+  assert(bitoffset,"bitoffset should be non nil")
+  local byte = string.byte(parserstate[1],index)
+  assert(byte,"byte should be non nil")
+  local result = bit32.rshift(
+    bit32.band(byte,
+      bit32.lshift(1, bitoffset)
+    )
+  , bitoffset
+  )
+  return update(parserstate,parserstate.index + 1, result)
+end)
+
+local one = Parser (function(parserstate)
+  if parserstate.iserror then return parserstate end
+  local byteoffset= math.floor(parserstate.index / 8)
+  local bitoffset = (parserstate.index - 1) % 8
+  assert(bitoffset,"bitoffset should be non nil")
+  local byte = string.byte(parserstate[1],index)
+  assert(byte,"byte should be non nil")
+  local result = bit32.rshift(
+    bit32.band(byte,
+      bit32.lshift(1, bitoffset)
+    )
+  , bitoffset
+  )
+  if result ~= 1 then
+      local emsg = string.format("expected one but got 0 @ index %d",parserstate.index)
+      return errorupdate(parserstate,emsg)
+  end
+  return update(parserstate,parserstate.index + 1, result)
+end)
+
+
+local zero = Parser (function(parserstate)
+  if parserstate.iserror then return parserstate end
+  local byteoffset= math.floor(parserstate.index / 8)
+  local bitoffset = (parserstate.index - 1) % 8
+  assert(bitoffset,"bitoffset should be non nil")
+  local byte = string.byte(parserstate[1],index)
+  assert(byte,"byte should be non nil")
+  local result = bit32.rshift(
+    bit32.band(byte,
+      bit32.lshift(1, bitoffset)
+    )
+  , bitoffset
+  )
+  if result ~= 0 then
+      local emsg = string.format("expected zero but got 1 @ index %d",parserstate.index)
+      return errorupdate(parserstate,emsg)
+  end
+  return update(parserstate,parserstate.index + 1, result)
+end)
+
+local p6 = sequenceof { bitparser, bitparser, bitparser, bitparser, bitparser, bitparser, bitparser, zero,}
+
+p6 = p6:map(function (res) return '0b' .. string.reverse(table.concat(res)) end)
+local binary_string = string.char(0x7f, 0x33)
+for i=1,string.len(binary_string),1 do
+    print(string.format('0x%02X',string.byte(binary_string, i)))
+end
+print('----------------------------------------------------')
+g = p6:run(binary_string)
+print('----------------------------------------------------')
+print_parser_state(g)
