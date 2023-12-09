@@ -11,7 +11,7 @@ local between = Parser.between
 local lazy = Parser.lazy
 local bitparser = Parser.bitparser
 local zero = Parser.zero
-local print_parser_state = Parser.print_parser_state
+print_parser_state = Parser.print_parser_state
 
 local p =  many1(choice({ letters, numbers}))
 p = p:map(function (x)
@@ -92,3 +92,32 @@ print('----------------------------------------------------')
 g = p6:run(binary_string)
 print_parser_state(g)
 print('----------------------------------------------------')
+
+
+
+local binary_string2 = string.char(234, 235)
+
+local bitparsers = {}
+for i=1,16 do table.insert(bitparsers,bitparser)
+
+end
+local pbinaryshow = sequenceof( bitparsers)
+pbinaryshow = pbinaryshow:map(function (res) return '0b' .. string.reverse(table.concat(res)) end)
+z = pbinaryshow:run(binary_string2)
+print_parser_state(z)
+
+p7 = Parser.int(16)
+h = p7:run(binary_string2)
+print_parser_state(h)
+
+print('----------------------------------------------------')
+p8 = Parser.uint(16)
+ii = p8:run(binary_string2)
+print_parser_state(ii)
+print('----------------------------------------------------')
+p9 = Parser.uint_he(16)
+lol = p9:run(string.reverse(binary_string2))
+print_parser_state(lol)
+
+
+

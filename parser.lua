@@ -16,6 +16,8 @@ function readonlytable(table)
 end
 local errorupdate = function (parserstate, errmsg)
   assert(parserstate,'something fishy in errorupdate')
+  assert(errmsg, 'errmsg is nil in errorupdate')
+  assert(type(errmsg) == 'string', string.format('errmsg is not a string in errorupdate type: <%s>', type(errmsg)))
   local newstate = {}
   newstate.iserror = true
   newstate.errormsg = errmsg
@@ -44,6 +46,8 @@ setmetatable(Parser, {
    end,
 })
 function Parser.new(f)
+  assert(f, 'f is nil in Parser.new')
+  assert(type(f) == 'function', 'f is not a function in Parser.new')
   local self = setmetatable({}, Parser)
   self.f =  f
   return self
@@ -342,10 +346,10 @@ end
 
 Parser.bitparser = Parser (function(parserstate)
   if parserstate.iserror then return parserstate end
-  local byteoffset= math.floor(parserstate.index / 8)
+  local byteoffset= math.floor((parserstate.index - 1) / 8)
   local bitoffset = (parserstate.index - 1) % 8
   assert(bitoffset,"bitoffset should be non nil")
-  local byte = string.byte(parserstate[1],index)
+  local byte = string.byte(parserstate[1],byteoffset + 1)
   assert(byte,"byte should be non nil")
   local result = bit32.rshift(
     bit32.band(byte,
@@ -358,10 +362,10 @@ end)
 
 Parser.one = Parser (function(parserstate)
   if parserstate.iserror then return parserstate end
-  local byteoffset= math.floor(parserstate.index / 8)
+  local byteoffset= math.floor( (parserstate.index - 1) / 8)
   local bitoffset = (parserstate.index - 1) % 8
   assert(bitoffset,"bitoffset should be non nil")
-  local byte = string.byte(parserstate[1],index)
+  local byte = string.byte(parserstate[1],byteoffset + 1)
   assert(byte,"byte should be non nil")
   local result = bit32.rshift(
     bit32.band(byte,
@@ -379,10 +383,10 @@ end)
 
 Parser.zero = Parser (function(parserstate)
   if parserstate.iserror then return parserstate end
-  local byteoffset= math.floor(parserstate.index / 8)
+  local byteoffset= math.floor( (parserstate.index - 1) / 8)
   local bitoffset = (parserstate.index - 1) % 8
   assert(bitoffset,"bitoffset should be non nil")
-  local byte = string.byte(parserstate[1],index)
+  local byte = string.byte(parserstate[1],byteoffset + 1)
   assert(byte,"byte should be non nil")
   local result = bit32.rshift(
     bit32.band(byte,
@@ -396,5 +400,62 @@ Parser.zero = Parser (function(parserstate)
   end
   return update(parserstate,parserstate.index + 1, result)
 end)
+
+Parser.uint = function (n)
+  local bitparsers = {}
+  for i=1,n do
+    table.insert(bitparsers, Parser.bitparser)
+  end
+  local bp = Parser.sequenceof(bitparsers)
+  bp = bp:map( function (x)
+    local res = 0
+    for i,v in pairs(x) do
+      res = res + 2^(i-1) * v
+    end
+    return res
+  end
+  )
+  return bp
+end
+
+Parser.uint_he = function (n)
+  local bitparsers = {}
+  for i=1,n do
+    table.insert(bitparsers, Parser.bitparser)
+  end
+  local bp = Parser.sequenceof(bitparsers)
+  bp = bp:map( function (x)
+    local res = 0
+    for i,v in pairs(x) do
+      res = res + 2^(i-1) * v
+    end
+    return res
+  end
+  )
+  return bp
+end
+
+Parser.int = function (n)
+  local bitparsers = {}
+  for i=1,n do
+    table.insert(bitparsers, Parser.bitparser)
+  end
+  local bp = Parser.sequenceof(bitparsers)
+  bp = bp:map( function (x)
+    local res = 0
+    local sign = 0
+    for i,v in pairs(x) do
+      if (i == n) then
+        -- sign = v == 1 and -1  or 1
+        res = res - 2^(n-1) * v
+      else
+        res = res + 2^(i-1) * v
+      end
+    end
+    return res
+  end
+  )
+  return bp
+end
 
 return Parser
