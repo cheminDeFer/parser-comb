@@ -98,26 +98,23 @@ print('----------------------------------------------------')
 local binary_string2 = string.char(234, 235)
 
 local bitparsers = {}
-for i=1,16 do table.insert(bitparsers,bitparser)
-
-end
+for i=1,16 do table.insert(bitparsers,bitparser)  end
 local pbinaryshow = sequenceof( bitparsers)
-pbinaryshow = pbinaryshow:map(function (res) return '0b' .. string.reverse(table.concat(res)) end)
+pbinaryshow = pbinaryshow:map(function (res) return '0b' .. (table.concat(res)) end)
 z = pbinaryshow:run(binary_string2)
 print_parser_state(z)
 
-p7 = Parser.int(16)
-h = p7:run(binary_string2)
-print_parser_state(h)
-
-print('----------------------------------------------------')
-p8 = Parser.uint(16)
+local p8 = Parser.uint(2,">")
 ii = p8:run(binary_string2)
 print_parser_state(ii)
 print('----------------------------------------------------')
-p9 = Parser.uint_he(16)
-lol = p9:run(string.reverse(binary_string2))
+local p9 = Parser.uint(2, "<")
+lol = p9:run(binary_string2)
 print_parser_state(lol)
+print('----------------------------------------------------')
 
-
-
+local binary_string3 = "abc"
+local compare = string.char(0x61,0x62,0x64)
+local p9 = Parser.binary_str(compare)
+kat = p9:run(binary_string3)
+print_parser_state(kat)

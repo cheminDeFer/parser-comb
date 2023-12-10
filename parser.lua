@@ -19,6 +19,7 @@ local errorupdate = function (parserstate, errmsg)
   assert(errmsg, 'errmsg is nil in errorupdate')
   assert(type(errmsg) == 'string', string.format('errmsg is not a string in errorupdate type: <%s>', type(errmsg)))
   local newstate = {}
+  newstate[1] = parserstate[1]
   newstate.iserror = true
   newstate.errormsg = errmsg
   newstate.result = nil
@@ -253,8 +254,9 @@ end
 Parser.print_parser_state = function (state)
 
   local f;
+  assert(state[1])
   if state.iserror then
-    f = string.format('{errormsg: %s}',state.errormsg)
+    f = string.format('{targetstring "%s", errormsg: %s}',state[1],state.errormsg)
   else
     local r
     if type(state.result) == "table" then
@@ -344,7 +346,7 @@ Parser.lazy = function (thunk)
 end
 
 
-Parser.bitparser = Parser (function(parserstate)
+Parser.bitparser_lsb = Parser (function(parserstate)
   if parserstate.iserror then return parserstate end
   local byteoffset= math.floor((parserstate.index - 1) / 8)
   local bitoffset = (parserstate.index - 1) % 8
@@ -401,10 +403,26 @@ Parser.zero = Parser (function(parserstate)
   return update(parserstate,parserstate.index + 1, result)
 end)
 
-Parser.uint = function (n)
+Parser.bitparser= Parser (function(parserstate)
+  if parserstate.iserror then return parserstate end
+  local byteoffset= math.floor((parserstate.index - 1) / 8)
+  local bitoffset = 7 -  (parserstate.index - 1) % 8
+  assert(bitoffset,"bitoffset should be non nil")
+  local byte = string.byte(parserstate[1],byteoffset + 1)
+  assert(byte,"byte should be non nil")
+  local result = bit32.rshift(
+    bit32.band(byte,
+      bit32.lshift(1, bitoffset)
+    )
+  , bitoffset
+  )
+  return update(parserstate,parserstate.index + 1, result)
+end)
+
+Parser.uint_le = function (n)
   local bitparsers = {}
   for i=1,n do
-    table.insert(bitparsers, Parser.bitparser)
+    table.insert(bitparsers, Parser.bitparser_lsb)
   end
   local bp = Parser.sequenceof(bitparsers)
   bp = bp:map( function (x)
@@ -418,16 +436,30 @@ Parser.uint = function (n)
   return bp
 end
 
-Parser.uint_he = function (n)
-  local bitparsers = {}
-  for i=1,n do
-    table.insert(bitparsers, Parser.bitparser)
+Parser.byte = Parser(function (parserstate)
+  if parserstate.iserror then return parserstate end
+  local byte = string.byte(parserstate[1],parserstate.index)
+  assert(byte,"byte should be non nil")
+  return update(parserstate, parserstate.index+1, byte)
+end
+)
+
+
+Parser.uint= function (nbytes, endiann)
+  assert(endiann == "<" or endiann == ">", "incorrect endiannness in Parser.uint")
+  local byteparsers = {}
+  for i=1,nbytes do
+    table.insert(byteparsers, Parser.byte)
   end
-  local bp = Parser.sequenceof(bitparsers)
+  local bp = Parser.sequenceof(byteparsers)
   bp = bp:map( function (x)
     local res = 0
     for i,v in pairs(x) do
-      res = res + 2^(i-1) * v
+      if endiann == "<" then
+        res = res + (2^8)^(i - 1) * v -- little endiann
+      else
+        res = res + (2^8)^(nbytes-1  -(i -1)) * v -- bigendiann
+      end
     end
     return res
   end
@@ -435,19 +467,40 @@ Parser.uint_he = function (n)
   return bp
 end
 
-Parser.int = function (n)
+Parser.int= function (nbytes, endiann)
+  assert(nil, "Parser.int is not implemented yet")
+  assert(endiann == "<" or endiann == ">", "incorrect endiannness in Parser.int")
+  local byteparsers = {}
+  for i=1,nbytes do
+    table.insert(byteparsers, Parser.byte)
+  end
+  local bp = Parser.sequenceof(byteparsers)
+  bp = bp:map( function (x)
+    local res = 0
+    for i,v in pairs(x) do
+      if endiann == "<" then
+        res = res + (2^8)^(i - 1) * v -- little endiann
+      else
+        res = res + (2^8)^(nbytes-1  -(i -1)) * v -- bigendiann
+      end
+    end
+    return res
+  end
+  )
+  return bp
+end
+
+Parser.int_le = function (n)
   local bitparsers = {}
   for i=1,n do
-    table.insert(bitparsers, Parser.bitparser)
+    table.insert(bitparsers, Parser.bitparser_lsb)
   end
   local bp = Parser.sequenceof(bitparsers)
   bp = bp:map( function (x)
     local res = 0
-    local sign = 0
     for i,v in pairs(x) do
       if (i == n) then
-        -- sign = v == 1 and -1  or 1
-        res = res - 2^(n-1) * v
+        res = res - 2^(i-1) * v
       else
         res = res + 2^(i-1) * v
       end
@@ -456,6 +509,40 @@ Parser.int = function (n)
   end
   )
   return bp
+end
+
+Parser.fail = function(emsg)
+  return Parser(function (parserstate)
+    return errorupdate(parserstate,emsg)
+  end
+  )
+end
+
+Parser.success = function(result)
+  return Parser(function (parserstate)
+    return update(parserstate,parserstate.index,result)
+  end
+  )
+end
+
+Parser.binary_str = function (s)
+  local byteparsers = {}
+  for i=1,#s do
+    local p = Parser.byte
+    p = p:chain(function(r)
+        local expected = string.byte(s, i)
+        if r == expected  then
+          return Parser.success(r)
+        else
+          return Parser.fail(string.format("expected char '%c' but got '%c' @ %d", expected, r, i))
+        end
+    end
+    )
+    table.insert(byteparsers, p)
+  end
+  local sp = Parser.sequenceof (byteparsers)
+
+  return sp
 end
 
 return Parser
